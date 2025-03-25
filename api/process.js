@@ -1,3 +1,4 @@
+const http = require('http');
 const puppeteer = require('puppeteer-core');
 const chrome = require('@sparticuz/chromium');
 
@@ -175,8 +176,8 @@ async function processUrl(page, videoUrl) {
   }
 }
 
-// Serverless handler function
-module.exports = async (req, res) => {
+// Handler function for HTTP requests
+async function handleRequest(req, res) {
   // Enable CORS
   res.setHeader('Access-Control-Allow-Credentials', true);
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -185,32 +186,60 @@ module.exports = async (req, res) => {
 
   // Handle preflight request
   if (req.method === 'OPTIONS') {
-    res.status(200).end();
+    res.statusCode = 200;
+    res.end();
     return;
   }
 
   // Handle GET request (status check)
-  if (req.method === 'GET') {
-    return res.status(200).json({
+  if (req.method === 'GET' && req.url === '/') {
+    res.statusCode = 200;
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({
       status: "online",
       message: "GrabnWatch API is running",
       usage: "Send POST request with JSON body containing 'url' field"
-    });
+    }));
+    return;
   }
   
   // Handle POST request
-  if (req.method === 'POST') {
+  if (req.method === 'POST' && req.url === '/') {
     let browser = null;
     try {
       // Parse request body
-      const body = req.body;
-      const videoUrl = body?.url;
+      let body = '';
+      req.on('data', chunk => {
+        body += chunk.toString();
+      });
+      
+      await new Promise((resolve) => {
+        req.on('end', resolve);
+      });
+      
+      let videoUrl;
+      try {
+        const parsedBody = JSON.parse(body);
+        videoUrl = parsedBody?.url;
+      } catch (e) {
+        logger.error(`Failed to parse request body: ${e.message}`);
+        res.statusCode = 400;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({
+          status: "error",
+          message: "Invalid JSON in request body"
+        }));
+        return;
+      }
       
       if (!videoUrl || typeof videoUrl !== 'string') {
-        return res.status(400).json({
+        res.statusCode = 400;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({
           status: "error",
           message: "Missing or invalid 'url' field in request body"
-        });
+        }));
+        return;
       }
       
       logger.info(`API request received for URL: ${videoUrl}`);
@@ -228,18 +257,22 @@ module.exports = async (req, res) => {
       }
       
       if (downloadOptions && downloadOptions.length > 0) {
-        return res.status(200).json({
+        res.statusCode = 200;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({
           status: "success",
           original_url: videoUrl,
           title: videoTitle,
           download_options: downloadOptions
-        });
+        }));
       } else {
-        return res.status(404).json({
+        res.statusCode = 404;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({
           status: "error",
           message: "Failed to generate download links",
           original_url: videoUrl
-        });
+        }));
       }
       
     } catch (error) {
@@ -254,16 +287,32 @@ module.exports = async (req, res) => {
         }
       }
       
-      return res.status(500).json({
+      res.statusCode = 500;
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({
         status: "error",
         message: `Server error: ${error.message}`
-      });
+      }));
     }
+    return;
   }
   
-  // Method not allowed
-  return res.status(405).json({ 
+  // Method not allowed or route not found
+  res.statusCode = 404;
+  res.setHeader('Content-Type', 'application/json');
+  res.end(JSON.stringify({ 
     status: "error",
-    message: "Method not allowed" 
-  });
-};
+    message: "Not found" 
+  }));
+}
+
+// Get port from environment variable or use default
+const port = process.env.PORT || 3000;
+
+// Create HTTP server
+const server = http.createServer(handleRequest);
+
+// Start server
+server.listen(port, () => {
+  logger.info(`Server running on port ${port}`);
+});
