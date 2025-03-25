@@ -1,0 +1,19 @@
+{
+  "version": 2,
+  "functions": {
+    "api/process.js": {
+      "memory": 3008,
+      "maxDuration": 60
+    }
+  },
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "/api/$1"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/api/process.js"
+    }
+  ]
+}
