@@ -14,7 +14,10 @@ async function initBrowser() {
   try {
     logger.info('Initializing browser...');
     
-    const executablePath = await chrome.executablePath;
+    // Fix: Call executablePath as a function
+    const executablePath = await chrome.executablePath();
+    
+    logger.info(`Executable path: ${executablePath}`);
     
     const browser = await puppeteer.launch({
       args: [...chrome.args, '--hide-scrollbars', '--disable-web-security'],
