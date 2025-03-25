@@ -1,0 +1,20 @@
+{
+  "name": "grabnwatch-api-vercel",
+  "version": "1.0.0",
+  "description": "GrabnWatch video download API for Vercel",
+  "main": "api/process.js",
+  "scripts": {
+    "start": "vercel dev"
+  },
+  "dependencies": {
+    "puppeteer-core": "^20.7.4",
+    "@sparticuz/chromium": "^119.0.2"
+  },
+  "devDependencies": {
+    "vercel": "^32.5.0"
+  },
+  "engines": {
+    "node": ">=18.x"
+  },
+  "license": "MIT"
+}
