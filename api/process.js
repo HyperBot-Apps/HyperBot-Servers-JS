@@ -22,15 +22,18 @@ async function initBrowser() {
   try {
     logger.info('Initializing browser...');
     
-    const executablePath = await chrome.executablePath;
+    // Fix: Call executablePath as a function
+    const executablePath = await chrome.executablePath();
     
-    browser = await puppeteer.launch({
-      args: chrome.args,
+    logger.info(`Executable path: ${executablePath}`);
+    
+    const browser = await puppeteer.launch({
+      args: [...chrome.args, '--hide-scrollbars', '--disable-web-security'],
       executablePath,
       headless: chrome.headless,
     });
     
-    page = await browser.newPage();
+    const page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36');
     
     // Open grabnwatch page
@@ -45,10 +48,10 @@ async function initBrowser() {
     await page.waitForSelector('#video_url', { visible: true, timeout: 15000 });
     
     logger.info('GrabnWatch page loaded and ready for input');
-    return true;
+    return { browser, page };
   } catch (error) {
     logger.error(`Failed to initialize browser: ${error.message}`);
-    return false;
+    throw error;
   }
 }
 
