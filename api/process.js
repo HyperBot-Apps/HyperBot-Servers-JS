@@ -1,5 +1,4 @@
-const puppeteer = require('puppeteer-core');
-const chrome = require('@sparticuz/chromium');
+const puppeteer = require('puppeteer');
 const express = require('express');
 const bodyParser = require('body-parser');
 
@@ -22,18 +21,16 @@ async function initBrowser() {
   try {
     logger.info('Initializing browser...');
     
-    // Fix: Call executablePath as a function
-    const executablePath = await chrome.executablePath();
-    
-    logger.info(`Executable path: ${executablePath}`);
-    
-    const browser = await puppeteer.launch({
-      args: [...chrome.args, '--hide-scrollbars', '--disable-web-security'],
-      executablePath,
-      headless: chrome.headless,
+    browser = await puppeteer.launch({
+      headless: 'new',
+      args: [
+        '--no-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu'
+      ]
     });
     
-    const page = await browser.newPage();
+    page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36');
     
     // Open grabnwatch page
@@ -48,10 +45,10 @@ async function initBrowser() {
     await page.waitForSelector('#video_url', { visible: true, timeout: 15000 });
     
     logger.info('GrabnWatch page loaded and ready for input');
-    return { browser, page };
+    return true;
   } catch (error) {
     logger.error(`Failed to initialize browser: ${error.message}`);
-    throw error;
+    return false;
   }
 }
 
