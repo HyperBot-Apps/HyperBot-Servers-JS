@@ -1,6 +1,10 @@
-const http = require('http');
 const puppeteer = require('puppeteer-core');
 const chrome = require('@sparticuz/chromium');
+const express = require('express');
+const bodyParser = require('body-parser');
+
+const app = express();
+app.use(bodyParser.json());
 
 // Simple console logger
 const logger = {
@@ -9,23 +13,24 @@ const logger = {
   error: (msg) => console.error(`[ERROR] ${msg}`)
 };
 
+// Single browser instance for simplicity
+let browser = null;
+let page = null;
+
 // Initialize browser
 async function initBrowser() {
   try {
     logger.info('Initializing browser...');
     
-    // Fix: Call executablePath as a function
-    const executablePath = await chrome.executablePath();
+    const executablePath = await chrome.executablePath;
     
-    logger.info(`Executable path: ${executablePath}`);
-    
-    const browser = await puppeteer.launch({
-      args: [...chrome.args, '--hide-scrollbars', '--disable-web-security'],
+    browser = await puppeteer.launch({
+      args: chrome.args,
       executablePath,
       headless: chrome.headless,
     });
     
-    const page = await browser.newPage();
+    page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36');
     
     // Open grabnwatch page
@@ -40,15 +45,15 @@ async function initBrowser() {
     await page.waitForSelector('#video_url', { visible: true, timeout: 15000 });
     
     logger.info('GrabnWatch page loaded and ready for input');
-    return { browser, page };
+    return true;
   } catch (error) {
     logger.error(`Failed to initialize browser: ${error.message}`);
-    throw error;
+    return false;
   }
 }
 
 // Process a video URL to get download links
-async function processUrl(page, videoUrl) {
+async function processUrl(videoUrl) {
   try {
     logger.info(`Processing URL: ${videoUrl}`);
     
@@ -179,143 +184,92 @@ async function processUrl(page, videoUrl) {
   }
 }
 
-// Handler function for HTTP requests
-async function handleRequest(req, res) {
-  // Enable CORS
-  res.setHeader('Access-Control-Allow-Credentials', true);
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,POST');
-  res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
+// API endpoints
+app.get('/', (req, res) => {
+  res.json({
+    status: "online",
+    message: "Simple GrabnWatch API is running",
+    usage: "Send POST request to /api/process with JSON body containing 'url' field"
+  });
+});
 
-  // Handle preflight request
-  if (req.method === 'OPTIONS') {
-    res.statusCode = 200;
-    res.end();
-    return;
-  }
-
-  // Handle GET request (status check)
-  if (req.method === 'GET' && req.url === '/') {
-    res.statusCode = 200;
-    res.setHeader('Content-Type', 'application/json');
-    res.end(JSON.stringify({
-      status: "online",
-      message: "GrabnWatch API is running",
-      usage: "Send POST request with JSON body containing 'url' field"
-    }));
-    return;
-  }
-  
-  // Handle POST request
-  if (req.method === 'POST' && req.url === '/') {
-    let browser = null;
-    try {
-      // Parse request body
-      let body = '';
-      req.on('data', chunk => {
-        body += chunk.toString();
-      });
-      
-      await new Promise((resolve) => {
-        req.on('end', resolve);
-      });
-      
-      let videoUrl;
-      try {
-        const parsedBody = JSON.parse(body);
-        videoUrl = parsedBody?.url;
-      } catch (e) {
-        logger.error(`Failed to parse request body: ${e.message}`);
-        res.statusCode = 400;
-        res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify({
-          status: "error",
-          message: "Invalid JSON in request body"
-        }));
-        return;
-      }
-      
-      if (!videoUrl || typeof videoUrl !== 'string') {
-        res.statusCode = 400;
-        res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify({
-          status: "error",
-          message: "Missing or invalid 'url' field in request body"
-        }));
-        return;
-      }
-      
-      logger.info(`API request received for URL: ${videoUrl}`);
-      
-      // Initialize browser for this request
-      const { browser: browserInstance, page } = await initBrowser();
-      browser = browserInstance;
-      
-      // Process the URL
-      const { downloadOptions, videoTitle } = await processUrl(page, videoUrl);
-      
-      // Close browser
-      if (browser) {
-        await browser.close();
-      }
-      
-      if (downloadOptions && downloadOptions.length > 0) {
-        res.statusCode = 200;
-        res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify({
-          status: "success",
-          original_url: videoUrl,
-          title: videoTitle,
-          download_options: downloadOptions
-        }));
-      } else {
-        res.statusCode = 404;
-        res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify({
-          status: "error",
-          message: "Failed to generate download links",
-          original_url: videoUrl
-        }));
-      }
-      
-    } catch (error) {
-      logger.error(`Error processing request: ${error.message}`);
-      
-      // Clean up browser if error occurs
-      if (browser) {
-        try {
-          await browser.close();
-        } catch (closeError) {
-          logger.error(`Error closing browser: ${closeError.message}`);
-        }
-      }
-      
-      res.statusCode = 500;
-      res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({
+app.post('/api/process', async (req, res) => {
+  try {
+    const { url: videoUrl } = req.body;
+    
+    if (!videoUrl || typeof videoUrl !== 'string') {
+      return res.status(400).json({
         status: "error",
-        message: `Server error: ${error.message}`
-      }));
+        message: "Missing or invalid 'url' field in request body"
+      });
     }
-    return;
+    
+    logger.info(`API request received for URL: ${videoUrl}`);
+    
+    // Make sure browser is initialized
+    if (!browser || !page) {
+      logger.info('Browser not initialized yet, initializing now...');
+      const initialized = await initBrowser();
+      if (!initialized) {
+        return res.status(500).json({
+          status: "error",
+          message: "Failed to initialize browser"
+        });
+      }
+    }
+    
+    // Process the URL
+    const { downloadOptions, videoTitle } = await processUrl(videoUrl);
+    
+    if (downloadOptions && downloadOptions.length > 0) {
+      return res.json({
+        status: "success",
+        original_url: videoUrl,
+        title: videoTitle,
+        download_options: downloadOptions
+      });
+    } else {
+      return res.status(500).json({
+        status: "error",
+        message: "Failed to generate download links",
+        original_url: videoUrl
+      });
+    }
+    
+  } catch (error) {
+    logger.error(`Error processing request: ${error.message}`);
+    return res.status(500).json({
+      status: "error",
+      message: `Server error: ${error.message}`
+    });
   }
-  
-  // Method not allowed or route not found
-  res.statusCode = 404;
-  res.setHeader('Content-Type', 'application/json');
-  res.end(JSON.stringify({ 
-    status: "error",
-    message: "Not found" 
-  }));
+});
+
+// Graceful shutdown
+async function shutdownServer() {
+  if (browser) {
+    logger.info('Closing browser...');
+    await browser.close();
+  }
+  logger.info('Server shutdown complete');
 }
 
-// Get port from environment variable or use default
-const port = process.env.PORT || 3000;
+// Register shutdown handlers
+process.on('SIGTERM', async () => {
+  logger.info('SIGTERM received, shutting down gracefully');
+  await shutdownServer();
+  process.exit(0);
+});
 
-// Create HTTP server
-const server = http.createServer(handleRequest);
+process.on('SIGINT', async () => {
+  logger.info('SIGINT received, shutting down gracefully');
+  await shutdownServer();
+  process.exit(0);
+});
 
-// Start server
-server.listen(port, () => {
-  logger.info(`Server running on port ${port}`);
+// Start the server
+const port = process.env.PORT || 8000;
+app.listen(port, '0.0.0.0', async () => {
+  console.log(`Simple GrabnWatch API Server running at http://0.0.0.0:${port}/`);
+  await initBrowser();
 });
